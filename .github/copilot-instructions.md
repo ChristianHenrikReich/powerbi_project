@@ -34,8 +34,11 @@ instructions aligned with that document.
   PBIP/PBIR relative references require forward slashes even on Windows.
 - Prefer star schemas, single-direction relationships, explicit measures with
   descriptions and format strings, and hidden technical/aggregated columns.
-- `npm run build:report` regenerates the sample page and its six named visuals.
-  Do not run it over intentional report edits without preserving those edits.
+- `python -m scripts.build_report` regenerates the sample page and its six named
+  visuals using Python's standard library. `npm run build:report` is an alias
+  for that command; Node.js is needed for the report-authoring CLI, not the
+  generator. Do not regenerate over intentional report edits without preserving
+  those edits.
 - Report schema validation does not prove correct rendering. For rendered
   changes, also open/refresh the model and inspect affected report pages using
   the skill's preview workflow. State clearly when live or rendered verification
