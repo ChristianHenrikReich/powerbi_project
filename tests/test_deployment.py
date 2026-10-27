@@ -462,22 +462,52 @@ class ProjectStructureTests(unittest.TestCase):
             self.assertLessEqual(box["x"] + box["width"], page["width"])
             self.assertLessEqual(box["y"] + box["height"], page["height"])
 
-    def test_workflow_pr_validation_and_environment_protection(self):
+    def test_ci_octopus_merges_open_prs_and_deploys_only_tst(self):
+        workflow = config.REPO_ROOT / ".github" / "workflows" / "pr-octopus-tst.yml"
+        data = yaml.load(workflow.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        self.assertEqual(set(data["on"]), {"pull_request"})
+        self.assertEqual(
+            set(data["on"]["pull_request"]["types"]),
+            {"opened", "reopened", "synchronize", "closed"},
+        )
+        self.assertEqual(set(data["jobs"]), {"octopus_merge", "deploy_tst"})
+        self.assertEqual(data["jobs"]["deploy_tst"]["needs"], "octopus_merge")
+        commands = "\n".join(
+            step["run"] for step in data["jobs"]["deploy_tst"]["steps"] if "run" in step
+        )
+        self.assertIn("python -m unittest discover -s tests", commands)
+        self.assertIn("npm run validate:report", commands)
+        validation = commands.index("npm run validate:report")
+        self.assertLess(validation, commands.index("scripts.setup_workspaces"))
+        self.assertLess(validation, commands.index("scripts.deploy"))
+        self.assertIn("--environment tst", commands)
+        for other in ("dev", "prd", "all"):
+            self.assertNotIn(f"--environment {other}", commands)
+
+    def test_cd_only_runs_after_a_main_pull_request_is_merged(self):
         workflow = config.REPO_ROOT / ".github" / "workflows" / "deploy-fabric.yml"
         data = yaml.load(workflow.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-        self.assertIn("pull_request", data["on"])
-        self.assertEqual(data["on"]["pull_request"]["branches"], ["main"])
-        self.assertEqual(data["on"]["push"]["branches"], ["main"])
-        self.assertEqual(data["on"]["workflow_dispatch"], {})
+        self.assertEqual(set(data["on"]), {"pull_request_target"})
+        self.assertEqual(data["on"]["pull_request_target"], {
+            "branches": ["main"], "types": ["closed"],
+        })
+        self.assertEqual(data["permissions"], {"contents": "read"})
+        self.assertEqual(set(data["jobs"]), {"deploy"})
         job = data["jobs"]["deploy"]
-        self.assertEqual(job["needs"], "validate")
-        self.assertIn("github.event_name != 'pull_request'", job["if"])
-        self.assertIn("refs/heads/main", job["if"])
+        self.assertEqual(job["if"], "github.event.pull_request.merged == true")
+        self.assertNotIn("needs", job)
+        checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+        self.assertEqual(
+            checkout["with"]["ref"], "${{ github.event.pull_request.merge_commit_sha }}"
+        )
+        self.assertEqual(checkout["with"]["persist-credentials"], "false")
+        commands = "\n".join(step["run"] for step in job["steps"] if "run" in step)
+        for validation in ("unittest", "validate:report", "setup-node", "npm ci"):
+            self.assertNotIn(validation, commands)
         self.assertEqual(job["environment"]["name"], "fabric-prd")
         self.assertEqual(job["concurrency"]["group"], "fabric-reporting-prd")
         self.assertEqual(job["concurrency"]["cancel-in-progress"], "false")
         self.assertEqual(job["permissions"]["id-token"], "write")
-        self.assertEqual(data["permissions"]["contents"], "read")
 
     def test_workflow_provisions_all_workspaces_but_only_publishes_prd(self):
         workflow = config.REPO_ROOT / ".github" / "workflows" / "deploy-fabric.yml"

@@ -5,9 +5,10 @@ A source-controlled Power BI starter following the workspace-folder and
 [TheEngineersGuideToMicrosoftFabric_Platform_Dev](https://github.com/ChristianHenrikReich/TheEngineersGuideToMicrosoftFabric_Platform_Dev).
 
 The semantic model and report share one reporting workspace in each environment.
-GitHub Actions validates pull requests. Pushes to main and manual runs on main
-ensure dev, tst, and prd workspaces exist, then deploy only to prd, subject to
-the production environment's approval rules.
+CI (`pr-octopus-tst.yml`) octopus-merges open pull requests and deploys the
+combined result to tst. A separate CD workflow runs
+only after a pull request into main is merged: it ensures dev, tst, and prd
+workspaces exist, then deploys only to prd, subject to production approval.
 
 ## Structure
 
@@ -16,6 +17,7 @@ the production environment's approval rules.
   copilot-instructions.md
   workflows\
     deploy-fabric.yml
+    pr-octopus-tst.yml
 solution\
   reporting\
     parameter.yml
@@ -213,13 +215,15 @@ a workspace exclusively owned by this repository; CI never enables it.
 ## GitHub Actions one-time setup
 
 1. Push these files to a GitHub repository with `main` as the deployment branch.
+   Protect `main`: require pull requests and a successful tst deployment check, and an
+   up-to-date branch (or equivalent merge controls) before merging.
 2. Create the GitHub Environment `fabric-prd`. Configure required reviewers and
    restrict deployment branches to `main`. Without required reviewers, production
    runs will not wait for approval. These protections are GitHub settings, not
    something workflow YAML creates. `fabric-dev` and `fabric-tst` are not used
    by this production-only workflow.
 3. Configure an Entra application/service principal and workload identity
-   federation for each environment. The OIDC subject is
+   federation for the production job. The OIDC subject is
    `repo:<owner>/<repository>:environment:fabric-prd`, with audience
    `api://AzureADTokenExchange`.
 4. In `fabric-prd`, add secrets `AZURE_CLIENT_ID` and
@@ -240,16 +244,39 @@ a workspace exclusively owned by this repository; CI never enables it.
    ones. Grant Contributor or higher on prd for model/report deployment. It does
    not publish items to dev or tst.
 
-Pull requests run only credential-free validation. A push to main runs validation,
-then waits for the configured `fabric-prd` approval. After approval, the job
-resolves/creates all three workspaces and deploys and refreshes only prd. Any
-workspace setup failure stops the job before publication. Existing dev/tst items
-are left unchanged. To rerun manually, run **Validate and deploy Power BI** with
-the **main** branch; there is no environment selector. Manual runs on other
-branches validate but do not provision or deploy. The run's selected main commit
-is deployed directly; this is not a Fabric Deployment Pipeline or a dev-to-prd
-promotion chain. Production/provisioning jobs are serialized and active jobs
-are not cancelled by newer runs.
+### CI: pull request integration checks
+
+`.github\workflows\pr-octopus-tst.yml` (**Octopus-merge open PRs and deploy to
+TST**) follows the reference platform. When a PR is opened, reopened, updated, or
+closed, it octopus-merges all open non-draft PRs into main, runs all validation
+(unit tests and PBIR schema validation) on the combined tree, then ensures the tst workspace exists and deploys and refreshes the combined
+result in tst only. A merge conflict between open PRs fails the run. With no open
+PRs, main is deployed to tst as-is. This workflow needs Azure OIDC credentials
+that accept the `pull_request` subject, and variables `REPORTING_TST_WORKSPACE_ID`
+or `REPORTING_TST_CAPACITY_ID` (or `REPORTING_CAPACITY_ID`).
+
+### CD: merged pull requests only
+
+`.github\workflows\deploy-fabric.yml` (**CD - Deploy merged changes to Fabric**)
+listens for closed PRs targeting main, but its jobs run only when
+`github.event.pull_request.merged == true`. Unmerged PR closures skip all CD
+jobs. Direct pushes and manual dispatch do not trigger deployment. CD contains
+no validation; all validation lives in CI.
+
+The workflow uses `pull_request_target` so post-merge deployment can use the
+repository's protected production credentials, including for a merged fork PR.
+It never checks out an unmerged PR head: it explicitly checks out the
+event's `merge_commit_sha`, including for squash/rebase merges. The job waits
+for the configured `fabric-prd` approval, then resolves/creates all three
+workspaces and deploys and refreshes only prd. Any workspace setup failure stops
+the job before publication. Existing dev/tst items are left unchanged.
+
+To retry a failed deployment, use GitHub Actions' **Re-run failed jobs** on the
+original merged-PR run; the merged revision remains pinned. This is not a Fabric
+Deployment Pipeline or a dev-to-prd promotion chain. Production/provisioning jobs
+are serialized and active deployments are not cancelled by newer runs. Unlike
+the reference platform's PR-to-TST deployment, this project makes no Fabric
+changes while a PR is open.
 
 ## Replace the sample with real data
 

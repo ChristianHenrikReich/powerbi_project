@@ -1,40 +1,17 @@
-name: Validate and deploy Power BI
+name: CD - Deploy merged changes to Fabric
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
-  push:
-    branches: [main]
-  workflow_dispatch: {}
+    types: [closed]
 
 permissions:
   contents: read
 
 jobs:
-  validate:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements-deploy.txt
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-      - run: python -m pip install -r requirements-deploy.txt
-      - run: npm ci
-      - name: Validate deployment automation and project structure
-        run: python -m unittest discover -s tests -v
-      - name: Validate PBIR
-        run: npm run validate:report
-
   deploy:
     name: Ensure all workspaces and deploy production
-    needs: validate
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event.pull_request.merged == true
     runs-on: windows-latest
     environment:
       name: fabric-prd
@@ -53,6 +30,9 @@ jobs:
       REPORTING_PRD_CAPACITY_ID: ${{ vars.REPORTING_PRD_CAPACITY_ID || vars.REPORTING_CAPACITY_ID }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
