@@ -1,0 +1,40 @@
+/// One row per synthetic product; filters sales by product and category.
+table Product
+	lineageTag: d5aac155-52a2-4daa-91dc-55df021e6a18
+
+	/// Unique integer product identifier.
+	column ProductKey
+		dataType: int64
+		isHidden
+		isKey
+		isAvailableInMdx: false
+		lineageTag: 1d1a942d-ab8e-4e92-90c2-2dfb3d8c208b
+		summarizeBy: none
+		sourceColumn: ProductKey
+
+	/// Display name of the synthetic product.
+	column Product
+		dataType: string
+		lineageTag: 7f019aaa-187e-4fe6-be18-6b754caa8616
+		summarizeBy: none
+		sourceColumn: Product
+
+	/// Product grouping used to filter the report.
+	column Category
+		dataType: string
+		lineageTag: c011ebd0-c1fa-4f47-b27b-88cc304f9c2f
+		summarizeBy: none
+		sourceColumn: Category
+
+	partition Product = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [ProductKey = Int64.Type, Product = text, Category = text], {
+				        {1, "Notebook", "Stationery"},
+				        {2, "Pen", "Stationery"},
+				        {3, "Mug", "Accessories"}
+				    })
+				in
+				    Source
+
