@@ -1,0 +1,4 @@
+/// Synthetic sales sample for semantic model and report CI/CD.
+database Sales
+	compatibilityLevel: 1702
+

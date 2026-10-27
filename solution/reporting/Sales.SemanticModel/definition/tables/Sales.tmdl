@@ -1,0 +1,73 @@
+/// One row per synthetic sales line. Amounts are unitless demo values, not financial records.
+table Sales
+	lineageTag: ada05e7e-dfb5-4138-9b85-7b075e2464cf
+
+	/// Sum of synthetic line amounts in the current filter context; no currency is implied.
+	measure 'Total Sales' = SUM('Sales'[SalesAmount])
+		formatString: #,##0.00
+		displayFolder: Sales metrics
+		lineageTag: 9b935762-ea27-4b84-ac60-6803f05688fd
+
+	/// Number of units sold in the current product/category selection.
+	measure 'Total Quantity' = SUM('Sales'[Quantity])
+		formatString: #,##0
+		displayFolder: Sales metrics
+		lineageTag: ceb18f47-49ef-4016-b0d2-d04d01d39aa3
+
+	/// Quantity-weighted sales amount per unit; blank when no units are selected.
+	measure 'Average Unit Price' = DIVIDE([Total Sales], [Total Quantity])
+		formatString: #,##0.00
+		displayFolder: Sales metrics
+		lineageTag: a28c1aea-2529-4756-aa21-6932b53eb2f4
+
+	/// Synthetic sales-line identifier retained to document sample grain.
+	column SaleKey
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: cc2c9a4c-7500-42a3-a5a9-9748cd09b16e
+		summarizeBy: none
+		sourceColumn: SaleKey
+
+	/// Foreign key linking each sales line to its product.
+	column ProductKey
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 4d97b578-b04c-43e8-b2ed-b41e1f597164
+		summarizeBy: none
+		sourceColumn: ProductKey
+
+	/// Units on the sales line; use the Total Quantity measure.
+	column Quantity
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9c96d6b4-a0e3-48e4-bfad-bd5d615edc80
+		summarizeBy: none
+		sourceColumn: Quantity
+
+	/// Synthetic extended line amount; use the Total Sales measure.
+	column SalesAmount
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: f263b316-9630-4f6f-aa9f-fd610a5333b5
+		summarizeBy: none
+		sourceColumn: SalesAmount
+
+	partition Sales = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [SaleKey = Int64.Type, ProductKey = Int64.Type, Quantity = Int64.Type, SalesAmount = Currency.Type], {
+				        {1, 1, 2, 20.00},
+				        {2, 2, 5, 10.00},
+				        {3, 3, 1, 15.00},
+				        {4, 1, 3, 30.00},
+				        {5, 2, 10, 20.00},
+				        {6, 3, 2, 30.00}
+				    })
+				in
+				    Source
+

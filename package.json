@@ -1,0 +1,16 @@
+{
+  "name": "power-bi-semantic-model-starter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Power BI semantic model and consuming report with Fabric CI/CD.",
+  "scripts": {
+    "build:report": "python -m scripts.build_report",
+    "validate:report": "powerbi-report-author validate solution\\reporting\\Sales.Report"
+  },
+  "devDependencies": {
+    "@microsoft/powerbi-report-authoring-cli": "0.5.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
