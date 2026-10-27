@@ -93,10 +93,14 @@ instructions aligned with that document.
   existing operation before resubmitting; do not blindly repeat deployment.
 - Keep orphan deletion opt-in. `--unpublish-orphans` is destructive and must not
   be enabled in CI or used in a shared workspace without explicit approval.
-- Pull requests validate without cloud credentials. Only `main` deploys: pushes
-  target dev, and manual dispatch selects dev/tst/prd. Preserve environment-scoped
-  OIDC credentials, per-environment deployment serialization, and the absence of
-  automatic configuration commits. Tst/prd approvals are configured in GitHub
-  Environment settings, not created by workflow YAML.
+- Pull requests validate without cloud credentials. Only `main` may provision or
+  deploy in CI: pushes and manual dispatch ensure all dev/tst/prd workspaces
+  exist, but publish and refresh items only in prd. Use `--environment all` only
+  for workspace setup, never for item deployment. The `fabric-prd` identity
+  provisions all workspaces; keep workspace ID overrides environment-specific.
+  Preserve the protected `fabric-prd` environment, OIDC, serialized jobs without
+  cancellation, and the absence of automatic configuration commits. Required
+  production reviewers must be configured in GitHub Environment settings; YAML
+  alone does not enforce approval.
 - Never commit PBIX files, imported-data caches, user-local settings, credentials,
   or temporary validation screenshots.

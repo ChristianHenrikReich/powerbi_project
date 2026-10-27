@@ -5,14 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: Target environment
-        required: true
-        type: choice
-        options: [dev, tst, prd]
-        default: dev
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -39,25 +32,25 @@ jobs:
         run: npm run validate:report
 
   deploy:
+    name: Ensure all workspaces and deploy production
     needs: validate
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
     environment:
-      name: fabric-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+      name: fabric-prd
     concurrency:
-      group: fabric-reporting-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+      group: fabric-reporting-prd
       cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
     env:
-      TARGET_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
-      REPORTING_DEV_WORKSPACE_ID: ${{ vars.REPORTING_WORKSPACE_ID }}
-      REPORTING_TST_WORKSPACE_ID: ${{ vars.REPORTING_WORKSPACE_ID }}
-      REPORTING_PRD_WORKSPACE_ID: ${{ vars.REPORTING_WORKSPACE_ID }}
-      REPORTING_DEV_CAPACITY_ID: ${{ vars.REPORTING_CAPACITY_ID }}
-      REPORTING_TST_CAPACITY_ID: ${{ vars.REPORTING_CAPACITY_ID }}
-      REPORTING_PRD_CAPACITY_ID: ${{ vars.REPORTING_CAPACITY_ID }}
+      REPORTING_DEV_WORKSPACE_ID: ${{ vars.REPORTING_DEV_WORKSPACE_ID }}
+      REPORTING_TST_WORKSPACE_ID: ${{ vars.REPORTING_TST_WORKSPACE_ID }}
+      REPORTING_PRD_WORKSPACE_ID: ${{ vars.REPORTING_PRD_WORKSPACE_ID || vars.REPORTING_WORKSPACE_ID }}
+      REPORTING_DEV_CAPACITY_ID: ${{ vars.REPORTING_DEV_CAPACITY_ID || vars.REPORTING_CAPACITY_ID }}
+      REPORTING_TST_CAPACITY_ID: ${{ vars.REPORTING_TST_CAPACITY_ID || vars.REPORTING_CAPACITY_ID }}
+      REPORTING_PRD_CAPACITY_ID: ${{ vars.REPORTING_PRD_CAPACITY_ID || vars.REPORTING_CAPACITY_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -71,11 +64,11 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
-      - name: Resolve or create selected workspace
+      - name: Resolve or create dev, tst, and prd workspaces
         run: >-
           python -m scripts.setup_workspaces --workspace reporting
-          --environment $env:TARGET_ENVIRONMENT --output .deploy\resolved-solution.yml
-      - name: Deploy model and consuming report, verify binding, and refresh
+          --environment all --output .deploy\resolved-solution.yml
+      - name: Deploy model and consuming report to prd, verify binding, and refresh
         run: >-
           python -m scripts.deploy --workspace reporting
-          --environment $env:TARGET_ENVIRONMENT --config .deploy\resolved-solution.yml --refresh
+          --environment prd --config .deploy\resolved-solution.yml --refresh
