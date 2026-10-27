@@ -16,7 +16,7 @@ from azure.identity import AzureCliCredential
 from fabric_cicd import FabricWorkspace
 from fabric_cicd._items._report import func_process_file
 
-from scripts import config, deploy
+from scripts import config, deploy, setup_workspaces
 from scripts.fabric_client import FABRIC_ROOT, POWERBI_ROOT, FabricClient
 from scripts.setup_workspaces import setup
 
@@ -163,6 +163,90 @@ class WorkspaceSetupTests(unittest.TestCase):
         self.client.list_all.return_value = []
         setup(self.config, "reporting", "prd", self.client, dry_run=True)
         self.assertEqual(self.config, before)
+        self.client.create_workspace.assert_not_called()
+
+    def test_all_environments_reuse_existing_and_create_only_missing_workspaces(self):
+        self.config["alias"]["reporting_capacity"] = CAPACITY_ID
+        self.config["workspaces"]["reporting"]["dev"]["id"] = WORKSPACE_ID
+        self.client.request.return_value = response({
+            "id": WORKSPACE_ID, "displayName": "Existing BI",
+        })
+        self.client.list_all.return_value = [{
+            "displayName": "sales-reporting-tst", "id": MODEL_ID,
+        }]
+        self.client.create_workspace.return_value = {"id": REPORT_ID}
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "config.yml"
+            output = Path(directory) / ".deploy" / "resolved.yml"
+            source.write_text(yaml.safe_dump(self.config), encoding="utf-8")
+            original = source.read_bytes()
+            with patch.object(setup_workspaces, "FabricClient", return_value=self.client):
+                setup_workspaces.main([
+                    "--environment", "all", "--config", str(source), "--output", str(output),
+                ])
+            resolved = config.load_config(output)
+            self.assertEqual(
+                [resolved["workspaces"]["reporting"][env]["id"] for env in config.ENVIRONMENTS],
+                [WORKSPACE_ID, MODEL_ID, REPORT_ID],
+            )
+            self.assertEqual(source.read_bytes(), original)
+        self.client.create_workspace.assert_called_once_with("sales-reporting-prd", CAPACITY_ID)
+        self.client.request.assert_called_once_with("GET", f"{FABRIC_ROOT}/workspaces/{WORKSPACE_ID}")
+
+    def test_all_environments_dry_run_does_not_create_or_write(self):
+        self.config["alias"]["reporting_capacity"] = CAPACITY_ID
+        self.client.list_all.return_value = []
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "config.yml"
+            output = Path(directory) / "resolved.yml"
+            source.write_text(yaml.safe_dump(self.config), encoding="utf-8")
+            original = source.read_bytes()
+            with patch.object(setup_workspaces, "FabricClient", return_value=self.client):
+                setup_workspaces.main([
+                    "--environment", "all", "--config", str(source),
+                    "--output", str(output), "--dry-run",
+                ])
+            self.assertFalse(output.exists())
+            self.assertEqual(source.read_bytes(), original)
+        self.assertEqual(self.client.list_all.call_count, len(config.ENVIRONMENTS))
+        self.client.create_workspace.assert_not_called()
+
+    def test_all_environments_setup_failure_propagates_without_writing_config(self):
+        self.config["workspaces"]["reporting"]["dev"]["id"] = WORKSPACE_ID
+        self.client.request.return_value = response({
+            "id": WORKSPACE_ID, "displayName": "Existing BI",
+        })
+        self.client.list_all.side_effect = requests.HTTPError("403 Forbidden")
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "config.yml"
+            output = Path(directory) / "resolved.yml"
+            source.write_text(yaml.safe_dump(self.config), encoding="utf-8")
+            original = source.read_bytes()
+            with (
+                patch.object(setup_workspaces, "FabricClient", return_value=self.client),
+                self.assertRaises(requests.HTTPError),
+            ):
+                setup_workspaces.main([
+                    "--environment", "all", "--config", str(source), "--output", str(output),
+                ])
+            self.assertFalse(output.exists())
+            self.assertEqual(source.read_bytes(), original)
+        self.client.create_workspace.assert_not_called()
+        self.client.list_all.assert_called_once()
+
+    def test_cli_selected_environment_does_not_resolve_other_environments(self):
+        self.config["workspaces"]["reporting"]["prd"]["id"] = REPORT_ID
+        self.client.request.return_value = response({
+            "id": REPORT_ID, "displayName": "Production BI",
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "config.yml"
+            source.write_text(yaml.safe_dump(self.config), encoding="utf-8")
+            with patch.object(setup_workspaces, "FabricClient", return_value=self.client):
+                setup_workspaces.main(["--environment", "prd", "--config", str(source)])
+            self.assertEqual(config.load_config(source), self.config)
+        self.client.request.assert_called_once_with("GET", f"{FABRIC_ROOT}/workspaces/{REPORT_ID}")
+        self.client.list_all.assert_not_called()
         self.client.create_workspace.assert_not_called()
 
 
@@ -382,12 +466,40 @@ class ProjectStructureTests(unittest.TestCase):
         workflow = config.REPO_ROOT / ".github" / "workflows" / "deploy-fabric.yml"
         data = yaml.load(workflow.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         self.assertIn("pull_request", data["on"])
+        self.assertEqual(data["on"]["pull_request"]["branches"], ["main"])
+        self.assertEqual(data["on"]["push"]["branches"], ["main"])
+        self.assertEqual(data["on"]["workflow_dispatch"], {})
         job = data["jobs"]["deploy"]
+        self.assertEqual(job["needs"], "validate")
         self.assertIn("github.event_name != 'pull_request'", job["if"])
         self.assertIn("refs/heads/main", job["if"])
-        self.assertIn("fabric-", job["environment"]["name"])
+        self.assertEqual(job["environment"]["name"], "fabric-prd")
+        self.assertEqual(job["concurrency"]["group"], "fabric-reporting-prd")
+        self.assertEqual(job["concurrency"]["cancel-in-progress"], "false")
         self.assertEqual(job["permissions"]["id-token"], "write")
         self.assertEqual(data["permissions"]["contents"], "read")
+
+    def test_workflow_provisions_all_workspaces_but_only_publishes_prd(self):
+        workflow = config.REPO_ROOT / ".github" / "workflows" / "deploy-fabric.yml"
+        data = yaml.load(workflow.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        job = data["jobs"]["deploy"]
+        commands = [step["run"] for step in job["steps"] if "run" in step]
+        setup_commands = [command for command in commands if "scripts.setup_workspaces" in command]
+        deploy_commands = [command for command in commands if "scripts.deploy" in command]
+        self.assertEqual(len(setup_commands), 1)
+        self.assertEqual(len(deploy_commands), 1)
+        self.assertIn("--environment all", setup_commands[0])
+        self.assertIn(r"--output .deploy\resolved-solution.yml", setup_commands[0])
+        self.assertIn("--environment prd", deploy_commands[0])
+        self.assertIn(r"--config .deploy\resolved-solution.yml", deploy_commands[0])
+        self.assertIn("--refresh", deploy_commands[0])
+        self.assertLess(commands.index(setup_commands[0]), commands.index(deploy_commands[0]))
+        for environment in ("dev", "tst"):
+            self.assertNotIn(f"--environment {environment}", deploy_commands[0])
+            self.assertEqual(
+                job["env"][f"REPORTING_{environment.upper()}_WORKSPACE_ID"],
+                "${{ vars.REPORTING_" + environment.upper() + "_WORKSPACE_ID }}",
+            )
 
 
 class FabricCicdIntegrationTests(unittest.TestCase):
