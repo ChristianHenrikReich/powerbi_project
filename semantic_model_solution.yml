@@ -1,0 +1,14 @@
+solution_name: sales
+alias:
+  reporting_capacity: 3678d3ba-4299-46ca-b224-84d43e27f850
+workspaces:
+  reporting:
+    dev:
+      id: b10bf696-737f-4dbc-9ef7-d9ad51e038df
+      capacity: reporting_capacity
+    tst:
+      id: ''
+      capacity: reporting_capacity
+    prd:
+      id: ''
+      capacity: reporting_capacity
