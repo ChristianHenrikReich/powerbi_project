@@ -4,7 +4,7 @@ alias:
 workspaces:
   reporting:
     dev:
-      id: b10bf696-737f-4dbc-9ef7-d9ad51e038df
+      id: 
       capacity: reporting_capacity
     tst:
       id: ''
