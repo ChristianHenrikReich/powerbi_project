@@ -5,8 +5,9 @@ A source-controlled Power BI starter following the workspace-folder and
 [TheEngineersGuideToMicrosoftFabric_Platform_Dev](https://github.com/ChristianHenrikReich/TheEngineersGuideToMicrosoftFabric_Platform_Dev).
 
 The semantic model and report share one reporting workspace in each environment.
-GitHub Actions validates pull requests, deploys main to dev, and supports manual
-deployment of main to tst or prd.
+GitHub Actions validates pull requests. Pushes to main and manual runs on main
+ensure dev, tst, and prd workspaces exist, then deploy only to prd, subject to
+the production environment's approval rules.
 
 ## Structure
 
@@ -178,8 +179,14 @@ python -m scripts.setup_workspaces --environment dev
 python -m scripts.deploy --workspace reporting --environment dev --refresh
 ```
 
+For explicitly authorized provisioning of all three environments, use
+`python -m scripts.setup_workspaces --environment all` (or add `--dry-run` to
+inspect without writes). This reuses existing workspaces and creates only missing
+ones; it does not publish or refresh items. The local deployment CLI still
+supports selecting dev/tst/prd, but GitHub Actions publishes only to prd.
+
 `--dry-run` reads workspace APIs but makes no changes. Without `--output`, setup
-persists the selected workspace ID in the input config. In CI, it writes to
+persists the resolved workspace IDs in the input config. In CI, it writes to
 `.deploy\resolved-solution.yml` and deploy consumes that file in the same job;
 the workflow does not push generated configuration commits.
 
@@ -206,30 +213,43 @@ a workspace exclusively owned by this repository; CI never enables it.
 ## GitHub Actions one-time setup
 
 1. Push these files to a GitHub repository with `main` as the deployment branch.
-2. Create GitHub Environments `fabric-dev`, `fabric-tst`, and `fabric-prd`.
-   Configure required reviewers and deployment branch restrictions for tst/prd.
-   Required reviewers are a GitHub setting, not something workflow YAML creates.
+2. Create the GitHub Environment `fabric-prd`. Configure required reviewers and
+   restrict deployment branches to `main`. Without required reviewers, production
+   runs will not wait for approval. These protections are GitHub settings, not
+   something workflow YAML creates. `fabric-dev` and `fabric-tst` are not used
+   by this production-only workflow.
 3. Configure an Entra application/service principal and workload identity
    federation for each environment. The OIDC subject is
-   `repo:<owner>/<repository>:environment:fabric-dev` (and equivalent tst/prd
-   subjects), with audience `api://AzureADTokenExchange`. Separate deployment
-   identities per environment are supported and recommended.
-4. In each GitHub Environment, add secrets `AZURE_CLIENT_ID` and
+   `repo:<owner>/<repository>:environment:fabric-prd`, with audience
+   `api://AzureADTokenExchange`.
+4. In `fabric-prd`, add secrets `AZURE_CLIENT_ID` and
    `AZURE_TENANT_ID`. No client secret or Azure subscription is required.
-5. Add environment variable `REPORTING_WORKSPACE_ID` for an existing workspace,
-   or `REPORTING_CAPACITY_ID` when setup should resolve/create the generated
-   workspace. These are GitHub configuration variables, not secrets.
+5. In `fabric-prd`, optionally override configured workspace IDs with
+   `REPORTING_DEV_WORKSPACE_ID`, `REPORTING_TST_WORKSPACE_ID`, and
+   `REPORTING_PRD_WORKSPACE_ID`. The existing `REPORTING_WORKSPACE_ID` variable
+   remains a fallback for prd only; it is never reused as the dev/tst ID.
+   `REPORTING_CAPACITY_ID` supplies a shared capacity fallback, or use distinct
+   `REPORTING_DEV_CAPACITY_ID`, `REPORTING_TST_CAPACITY_ID`, and
+   `REPORTING_PRD_CAPACITY_ID`. Nonempty variables override the solution config;
+   blank variables leave its values intact. These are GitHub configuration
+   variables, not secrets.
 6. Enable the tenant settings allowing the identity/security group to call
-   Fabric and Power BI APIs. Grant it an appropriate workspace role (Contributor
-   or higher for item deployment) and the additional workspace-creation/capacity
-   assignment permissions if setup will create workspaces.
+   Fabric and Power BI APIs. This workflow uses the production identity for all
+   workspace provisioning: it needs access to resolve existing dev/tst/prd
+   workspaces and workspace-creation/capacity assignment permissions for missing
+   ones. Grant Contributor or higher on prd for model/report deployment. It does
+   not publish items to dev or tst.
 
-Pull requests run only credential-free validation. A push to main runs validation
-then deploys dev. To promote, manually run **Validate and deploy Power BI**, select
-the **main** branch and tst or prd, and approve the environment deployment. Manual
-runs on other branches validate but do not deploy. The selected main commit is
-deployed directly; this is not a Fabric Deployment Pipeline or an artifact
-promotion chain. Deployments to the same environment are serialized.
+Pull requests run only credential-free validation. A push to main runs validation,
+then waits for the configured `fabric-prd` approval. After approval, the job
+resolves/creates all three workspaces and deploys and refreshes only prd. Any
+workspace setup failure stops the job before publication. Existing dev/tst items
+are left unchanged. To rerun manually, run **Validate and deploy Power BI** with
+the **main** branch; there is no environment selector. Manual runs on other
+branches validate but do not provision or deploy. The run's selected main commit
+is deployed directly; this is not a Fabric Deployment Pipeline or a dev-to-prd
+promotion chain. Production/provisioning jobs are serialized and active jobs
+are not cancelled by newer runs.
 
 ## Replace the sample with real data
 
