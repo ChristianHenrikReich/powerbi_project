@@ -1,0 +1,117 @@
+name: Octopus-merge open PRs and deploy to TST
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+permissions:
+  id-token: write     # OIDC to Entra (requires federated credential with pull_request subject)
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-octopus-tst
+  cancel-in-progress: true
+
+jobs:
+  octopus_merge:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    outputs:
+      pr_count: ${{ steps.merge.outputs.pr_count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Octopus-merge all open PR branches
+        id: merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          mapfile -t prs < <(gh pr list \
+            --state open \
+            --base main \
+            --draft=false \
+            --json number,headRefName,headRefOid \
+            --jq '.[] | "\(.number)\t\(.headRefName)\t\(.headRefOid)"')
+
+          echo "pr_count=${#prs[@]}" >> "$GITHUB_OUTPUT"
+          echo "Open PRs: ${#prs[@]}"
+
+          if [ "${#prs[@]}" -eq 0 ]; then
+            echo "No open PRs — deploying main as-is."
+            exit 0
+          fi
+
+          refs=()
+          for line in "${prs[@]}"; do
+            num=$(cut -f1 <<<"$line")
+            branch=$(cut -f2 <<<"$line")
+            sha=$(cut -f3 <<<"$line")
+            echo "  PR #$num  $branch  $sha"
+            git fetch origin "$sha"
+            refs+=("$sha")
+          done
+
+          msg="octopus-merge of $(IFS=,; echo "${refs[*]}")"
+          if ! git merge --no-ff -m "$msg" "${refs[@]}"; then
+            echo "::error::Octopus merge failed (conflict). Resolve overlap between open PRs."
+            exit 1
+          fi
+
+          git log --oneline -n 5
+
+      - name: Upload merged tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: octopus-tree
+          path: .
+          include-hidden-files: true
+          retention-days: 1
+
+  deploy_tst:
+    needs: octopus_merge
+    runs-on: ubuntu-latest
+    env:
+      REPORTING_TST_WORKSPACE_ID: ${{ vars.REPORTING_TST_WORKSPACE_ID }}
+      REPORTING_TST_CAPACITY_ID: ${{ vars.REPORTING_TST_CAPACITY_ID || vars.REPORTING_CAPACITY_ID }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: octopus-tree
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements-deploy.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: npm ci
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests
+
+      - name: Validate PBIR
+        run: npm run validate:report
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Setup Fabric workspace (tst)
+        run: python -m scripts.setup_workspaces --workspace reporting --environment tst --output .deploy/resolved-solution.yml
+
+      - name: Deploy model and report to tst
+        run: python -m scripts.deploy --workspace reporting --environment tst --config .deploy/resolved-solution.yml --refresh
