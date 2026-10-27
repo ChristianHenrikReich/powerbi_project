@@ -1,4 +1,4 @@
-"""Resolve or create only the selected environment's reporting workspace."""
+"""Resolve or create reporting workspaces for one environment or all environments."""
 
 from __future__ import annotations
 
@@ -51,13 +51,16 @@ def setup(config: dict, workspace: str, environment: str, client: FabricClient, 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", choices=WORKSPACES, default="reporting")
-    parser.add_argument("--environment", choices=ENVIRONMENTS, required=True)
+    parser.add_argument("--environment", choices=(*ENVIRONMENTS, "all"), required=True)
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
     parser.add_argument("--output", type=Path, help="Write resolved config here instead of changing the input.")
     parser.add_argument("--dry-run", action="store_true", help="Read APIs but do not create or write anything.")
     args = parser.parse_args(argv)
     config = load_config(args.config)
-    setup(config, args.workspace, args.environment, FabricClient(), dry_run=args.dry_run)
+    client = FabricClient()
+    environments = ENVIRONMENTS if args.environment == "all" else (args.environment,)
+    for environment in environments:
+        setup(config, args.workspace, environment, client, dry_run=args.dry_run)
     if not args.dry_run:
         output = args.output or args.config
         output.parent.mkdir(parents=True, exist_ok=True)
