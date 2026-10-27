@@ -93,11 +93,16 @@ instructions aligned with that document.
   existing operation before resubmitting; do not blindly repeat deployment.
 - Keep orphan deletion opt-in. `--unpublish-orphans` is destructive and must not
   be enabled in CI or used in a shared workspace without explicit approval.
-- Pull requests validate without cloud credentials. Only `main` may provision or
-  deploy in CI: pushes and manual dispatch ensure all dev/tst/prd workspaces
-  exist, but publish and refresh items only in prd. Use `--environment all` only
-  for workspace setup, never for item deployment. The `fabric-prd` identity
-  provisions all workspaces; keep workspace ID overrides environment-specific.
+- Keep CI and CD in separate workflows. `pr-octopus-tst.yml` (CI) octopus-merges
+  open PRs and deploys the result to tst only. `deploy-fabric.yml` (CD) runs only
+  on a closed PR targeting `main` with `merged == true`; no prd provisioning or
+  deployment on open PRs, unmerged closures, direct pushes, or manual dispatch.
+  Keep the CD job pinned to the event's `merge_commit_sha`, never an unmerged
+  PR head. All validation (unit tests, PBIR validation) belongs in CI, not CD.
+- CD ensures all dev/tst/prd workspaces exist, but publishes and refreshes items
+  only in prd. Use `--environment all` only for workspace setup, never for item
+  deployment. The `fabric-prd` identity provisions all workspaces; keep workspace
+  ID overrides environment-specific.
   Preserve the protected `fabric-prd` environment, OIDC, serialized jobs without
   cancellation, and the absence of automatic configuration commits. Required
   production reviewers must be configured in GitHub Environment settings; YAML
