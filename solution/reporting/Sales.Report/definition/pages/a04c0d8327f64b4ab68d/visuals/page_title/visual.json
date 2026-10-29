@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Sales by prodcut and category",
+                    "value": "Sales by Product and Category",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "32px",
@@ -41,7 +41,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Sales by prodcut and category'"
+                  "Value": "'Sales by Product and Category'"
                 }
               }
             }
