@@ -70,12 +70,25 @@ instructions aligned with that document.
 - Update directly related documentation when behavior or setup changes. Preserve
   unrelated user changes.
 
+## Git branching
+
+- When doing new work, you must update the main branch with the latest changes from the remote repository before starting your work. Then branch out from the updated main branch.
+- Create a new branch for each feature or bugfix. Name branches descriptively, such as `feature/add-reporting-capacity` or `bugfix/fix-schema-validation`.
+- Avoid working directly on the `main` branch. All changes must go through a pull request targeting `main`.
+
 ## Git commits
 
 - Keep commits small and reviewable, with exactly one logical change per commit.
   Split unrelated changes into separate commits.
 - A single logical change may span many files, such as a consistent rename
   throughout the project. Keep those related edits together in one commit.
+
+## Git push
+
+- You must always ask for approval before pushing changes to the remote repository, especially to the `main` branch.
+- Never push directly to the `main` branch without a pull request and required approvals.
+- Always ensure your local branch is up-to-date with the remote `main` before pushing changes.
+- Rebase your branch onto the latest `main` if necessary to resolve conflicts before pushing.
 
 ## Authentication and deployment safety
 
