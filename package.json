@@ -4,7 +4,6 @@
   "private": true,
   "description": "Power BI semantic model and consuming report with Fabric CI/CD.",
   "scripts": {
-    "build:report": "python -m scripts.build_report",
     "validate:report": "powerbi-report-author validate solution/reporting/Sales.Report"
   },
   "devDependencies": {
